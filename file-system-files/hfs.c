@@ -12,7 +12,7 @@
 #include "getopt.h"
 #include "fuse.h"
 #include "errno.h"
-#include "wfs.h"
+#include "hfs.h"
 #include "stdbool.h"
 
 #define MAX_PATH_NAME 264
@@ -22,7 +22,7 @@
 
 // Global vars
 static char **disks;
-static struct wfs_sb *superblock;
+static struct hfs_sb *superblock;
 static int num_disks;
 static int *fileDescs;
 size_t diskSize;
@@ -66,7 +66,7 @@ int raid_read_block(int disk_idx, int inode_idx, off_t block_idx, char *data, si
     return FAIL;
 }
 
-struct wfs_inode* get_inode(off_t index) {
+struct hfs_inode* get_inode(off_t index) {
     printf("Entering get_inode\n");
     if (index < 0 || index >= superblock->num_inodes) {
         printf("get_inode: failed\n");
@@ -76,7 +76,7 @@ struct wfs_inode* get_inode(off_t index) {
     char* inode_offset = (char*) disks[0] + superblock->i_blocks_ptr; 
 
     printf("Returing from get_inode\n");
-    return (struct wfs_inode*)((char*)inode_offset + index * BLOCK_SIZE);
+    return (struct hfs_inode*)((char*)inode_offset + index * BLOCK_SIZE);
 }
 
 static int allocate_data_block() {
@@ -150,7 +150,7 @@ static off_t find_inode(const char *path) {
     int current_inode = 0;
 
     while (token != NULL) {
-        struct wfs_inode *dir_inode;
+        struct hfs_inode *dir_inode;
         dir_inode = get_inode(current_inode);
 
         if (!(dir_inode->mode & S_IFDIR)) {
@@ -163,8 +163,8 @@ static off_t find_inode(const char *path) {
             if (dir_inode->blocks[block_index] == -1) continue;
 
             // Iterate over all entries in the current block
-            for (int offset = 0; offset < BLOCK_SIZE; offset += sizeof(struct wfs_dentry)) {
-                struct wfs_dentry *entry = (struct wfs_dentry *)(disks[0] + superblock->d_blocks_ptr + dir_inode->blocks[block_index] * BLOCK_SIZE + offset);
+            for (int offset = 0; offset < BLOCK_SIZE; offset += sizeof(struct hfs_dentry)) {
+                struct hfs_dentry *entry = (struct hfs_dentry *)(disks[0] + superblock->d_blocks_ptr + dir_inode->blocks[block_index] * BLOCK_SIZE + offset);
                 
                 if (strlen(entry->name) <= 0) continue;
 
@@ -188,21 +188,21 @@ static off_t find_inode(const char *path) {
     return current_inode;
 }
 
-static int wfs_getattr(const char *path, struct stat *stbuf) {
-    printf("Entering wfs_getattr: Path = %s\n", path);
+static int hfs_getattr(const char *path, struct stat *stbuf) {
+    printf("Entering hfs_getattr: Path = %s\n", path);
     memset(stbuf, 0, sizeof(struct stat));
     int inode_idx = find_inode(path);
     printf("Inode idx: %i\n", inode_idx);
     if (inode_idx < 0) {
-        fprintf(stderr, "wfs_getattr: Found invalid inode index\n");
+        fprintf(stderr, "hfs_getattr: Found invalid inode index\n");
         return inode_idx;
     }
-    struct wfs_inode *inode = get_inode(inode_idx);
+    struct hfs_inode *inode = get_inode(inode_idx);
     if (!inode) {
-        fprintf(stderr, "wfs_getattr: Invalid inode index, cannot find inode\n");
+        fprintf(stderr, "hfs_getattr: Invalid inode index, cannot find inode\n");
         return -ENOENT;
     }
-    //printf("wfs_getattr: Nlinks=%i, size=%li, num=%i\n", inode->nlinks, inode->size, inode->num);
+    //printf("hfs_getattr: Nlinks=%i, size=%li, num=%i\n", inode->nlinks, inode->size, inode->num);
     //printf("Going to edit attributes\n");
     stbuf->st_mode = inode->mode;
     stbuf->st_nlink = inode->nlinks;
@@ -218,26 +218,26 @@ static int wfs_getattr(const char *path, struct stat *stbuf) {
     return SUCCESS;
 }
 
-static int wfs_mknod(const char *path, mode_t mode, dev_t dev) {
-    printf("Entering wfs_mknod\n");
-    printf("wfs_mknod: path = %s\n", path);
+static int hfs_mknod(const char *path, mode_t mode, dev_t dev) {
+    printf("Entering hfs_mknod\n");
+    printf("hfs_mknod: path = %s\n", path);
     char parentPath[MAX_PATH_NAME];
     char origPath[MAX_PATH_NAME];
     char childPath[MAX_PATH_NAME];
     strcpy(origPath, path);
     split_path(origPath, parentPath, childPath);
     int parentInodeIdx = find_inode(parentPath);
-    printf("wfs_mknod: Parent inode index: %i\n", parentInodeIdx);
+    printf("hfs_mknod: Parent inode index: %i\n", parentInodeIdx);
 
     if (parentInodeIdx < 0) return -ENOENT;
 
     if (find_inode(childPath) >= 0) return -EEXIST;
 
     int childInodeIdx = allocate_inode();
-    printf("wfs_mknod: Inode index: %i\n", childInodeIdx);
+    printf("hfs_mknod: Inode index: %i\n", childInodeIdx);
     if (childInodeIdx < 0) return -ENOSPC;
 
-    struct wfs_inode childInode = {0};
+    struct hfs_inode childInode = {0};
     childInode.mode = mode | S_IFREG;
     childInode.num = childInodeIdx;
     childInode.nlinks = 1;
@@ -249,8 +249,8 @@ static int wfs_mknod(const char *path, mode_t mode, dev_t dev) {
         childInode.blocks[i] = -1;
     }
 
-    printf("wfs_mknod: Starting directory entry logic!\n");
-    struct wfs_inode* parentInode = get_inode(parentInodeIdx);
+    printf("hfs_mknod: Starting directory entry logic!\n");
+    struct hfs_inode* parentInode = get_inode(parentInodeIdx);
 
     // Find Block and dEntry
     int blockIdx = -1;
@@ -273,8 +273,8 @@ static int wfs_mknod(const char *path, mode_t mode, dev_t dev) {
             //printf("directory logic: location - parentInode->blocks[%d]=%d at dentryIdx=%d\n", blockIdx, dataBlockIdx, dentryIdx);
             break;
         } else {
-            struct wfs_dentry *dentry = (struct wfs_dentry*)(disks[0] + superblock->d_blocks_ptr + parentInode->blocks[i] * BLOCK_SIZE);
-            for (int j = 0; j * sizeof(struct wfs_dentry) < BLOCK_SIZE; j++) {
+            struct hfs_dentry *dentry = (struct hfs_dentry*)(disks[0] + superblock->d_blocks_ptr + parentInode->blocks[i] * BLOCK_SIZE);
+            for (int j = 0; j * sizeof(struct hfs_dentry) < BLOCK_SIZE; j++) {
                 if (dentry[j].num <= 0) {
                     //printf("directory logic: found room in alloced dBlock\n");
                     blockIdx = i;
@@ -291,7 +291,7 @@ static int wfs_mknod(const char *path, mode_t mode, dev_t dev) {
     if (blockIdx == -1 && dentryIdx == -1) return -ENOSPC;
 
     // create
-    struct wfs_dentry entry = {0};
+    struct hfs_dentry entry = {0};
     strncpy(entry.name, childPath, MAX_NAME - 1);
     entry.num = childInodeIdx;
 
@@ -302,7 +302,7 @@ static int wfs_mknod(const char *path, mode_t mode, dev_t dev) {
         // printf("directory logic: placing childInode into disk=%d childInodeIdx=%d\n", i, childInodeIdx);
         memcpy(disks[i] + superblock->i_blocks_ptr + childInodeIdx * BLOCK_SIZE, &childInode, BLOCK_SIZE);
 
-        struct wfs_inode *parentInodePtr = (struct wfs_inode*)(disks[i] + superblock->i_blocks_ptr + parentInodeIdx * BLOCK_SIZE);
+        struct hfs_inode *parentInodePtr = (struct hfs_inode*)(disks[i] + superblock->i_blocks_ptr + parentInodeIdx * BLOCK_SIZE);
         // update blocks if we alloced
         if (allocd == 1) {
             // printf("directory logic: alloc -> updating alloc disk info\n");
@@ -313,43 +313,43 @@ static int wfs_mknod(const char *path, mode_t mode, dev_t dev) {
         } else {
             // only clear entry
             // printf("directory logic: no alloc -> clearing parentInode->blocks[%d]\n", blockIdx);
-            memset(disks[i] + superblock->d_blocks_ptr + parentInode->blocks[blockIdx] * BLOCK_SIZE + dentryIdx * sizeof(struct wfs_dentry), 0, sizeof(struct wfs_dentry));
+            memset(disks[i] + superblock->d_blocks_ptr + parentInode->blocks[blockIdx] * BLOCK_SIZE + dentryIdx * sizeof(struct hfs_dentry), 0, sizeof(struct hfs_dentry));
         }
 
         // copy in dentry
         // printf("directory logic: copying in dentry \n", blockIdx);
-        memcpy((disks[i] + superblock->d_blocks_ptr + dataBlockIdx * BLOCK_SIZE + dentryIdx * sizeof(struct wfs_dentry)), &entry, sizeof(struct wfs_dentry));
+        memcpy((disks[i] + superblock->d_blocks_ptr + dataBlockIdx * BLOCK_SIZE + dentryIdx * sizeof(struct hfs_dentry)), &entry, sizeof(struct hfs_dentry));
         // printf("directory logic: copied entry into dataBlockIdx=%d dentryIdx=%d\n", dataBlockIdx, dentryIdx);
 
         // edit parentInode
         parentInodePtr->nlinks++;
-        parentInodePtr->size += sizeof(struct wfs_dentry);
+        parentInodePtr->size += sizeof(struct hfs_dentry);
     }
 
     printf("Returning from mkdir\n");
     return SUCCESS;
 }
 
-static int wfs_mkdir(const char *path, mode_t mode) {
-    printf("Entering wfs_mkdir\n");
-    printf("wfs_mkdir: path = %s\n", path);
+static int hfs_mkdir(const char *path, mode_t mode) {
+    printf("Entering hfs_mkdir\n");
+    printf("hfs_mkdir: path = %s\n", path);
     char parentPath[MAX_PATH_NAME];
     char origPath[MAX_PATH_NAME];
     char childPath[MAX_PATH_NAME];
     strcpy(origPath, path);
     split_path(origPath, parentPath, childPath);
     int parentInodeIdx = find_inode(parentPath);
-    printf("wfs_mkdir: Parent inode index: %i\n", parentInodeIdx);
+    printf("hfs_mkdir: Parent inode index: %i\n", parentInodeIdx);
 
     if (parentInodeIdx < 0) return -ENOENT;
 
     if (find_inode(childPath) >= 0) return -EEXIST;
 
     int childInodeIdx = allocate_inode();
-    printf("wfs_mkdir: Inode index: %i\n", childInodeIdx);
+    printf("hfs_mkdir: Inode index: %i\n", childInodeIdx);
     if (childInodeIdx < 0) return -ENOSPC;
 
-    struct wfs_inode childInode = {0};
+    struct hfs_inode childInode = {0};
     childInode.mode = (mode & 0777) | S_IFDIR;
     childInode.num = childInodeIdx;
     childInode.nlinks = 2;
@@ -361,8 +361,8 @@ static int wfs_mkdir(const char *path, mode_t mode) {
         childInode.blocks[i] = -1;
     }
 
-    printf("wfs_mkdir: Starting directory entry logic!\n");
-    struct wfs_inode* parentInode = get_inode(parentInodeIdx);
+    printf("hfs_mkdir: Starting directory entry logic!\n");
+    struct hfs_inode* parentInode = get_inode(parentInodeIdx);
 
     // Find Block and dEntry
     int blockIdx = -1;
@@ -384,8 +384,8 @@ static int wfs_mkdir(const char *path, mode_t mode) {
             printf("directory logic: location - parentInode->blocks[%d]=%d at dentryIdx=%d\n", blockIdx, dataBlockIdx, dentryIdx);
             break;
         } else {
-            struct wfs_dentry *dentry = (struct wfs_dentry*)(disks[0] + superblock->d_blocks_ptr + parentInode->blocks[i] * BLOCK_SIZE);
-            for (int j = 0; j * sizeof(struct wfs_dentry) < BLOCK_SIZE; j++) {
+            struct hfs_dentry *dentry = (struct hfs_dentry*)(disks[0] + superblock->d_blocks_ptr + parentInode->blocks[i] * BLOCK_SIZE);
+            for (int j = 0; j * sizeof(struct hfs_dentry) < BLOCK_SIZE; j++) {
                 if (dentry[j].num <= 0) {
                     printf("directory logic: found room in alloced dBlock\n");
                     blockIdx = i;
@@ -402,7 +402,7 @@ static int wfs_mkdir(const char *path, mode_t mode) {
     if (blockIdx == -1 && dentryIdx == -1) return -ENOSPC;
 
     // create
-    struct wfs_dentry entry = {0};
+    struct hfs_dentry entry = {0};
     strncpy(entry.name, childPath, MAX_NAME - 1);
     entry.num = childInodeIdx;
 
@@ -413,7 +413,7 @@ static int wfs_mkdir(const char *path, mode_t mode) {
         printf("directory logic: placing childInode into disk=%d childInodeIdx=%d\n", i, childInodeIdx);
         memcpy(disks[i] + superblock->i_blocks_ptr + childInodeIdx * BLOCK_SIZE, &childInode, BLOCK_SIZE);
 
-        struct wfs_inode *parentInodePtr = (struct wfs_inode*)(disks[i] + superblock->i_blocks_ptr + parentInodeIdx * BLOCK_SIZE);
+        struct hfs_inode *parentInodePtr = (struct hfs_inode*)(disks[i] + superblock->i_blocks_ptr + parentInodeIdx * BLOCK_SIZE);
         // update blocks if we alloced
         if (allocd == 1) {
             printf("directory logic: alloc -> updating alloc disk info\n");
@@ -424,25 +424,25 @@ static int wfs_mkdir(const char *path, mode_t mode) {
         } else {
             // only clear entry
             printf("directory logic: no alloc -> clearing parentInode->blocks[%d]\n", blockIdx);
-            memset(disks[i] + superblock->d_blocks_ptr + parentInode->blocks[blockIdx] * BLOCK_SIZE + dentryIdx * sizeof(struct wfs_dentry), 0, sizeof(struct wfs_dentry));
+            memset(disks[i] + superblock->d_blocks_ptr + parentInode->blocks[blockIdx] * BLOCK_SIZE + dentryIdx * sizeof(struct hfs_dentry), 0, sizeof(struct hfs_dentry));
         }
 
         // copy in dentry
         // printf("directory logic: copying in dentry \n", blockIdx);
-        memcpy((disks[i] + superblock->d_blocks_ptr + dataBlockIdx * BLOCK_SIZE + dentryIdx * sizeof(struct wfs_dentry)), &entry, sizeof(struct wfs_dentry));
+        memcpy((disks[i] + superblock->d_blocks_ptr + dataBlockIdx * BLOCK_SIZE + dentryIdx * sizeof(struct hfs_dentry)), &entry, sizeof(struct hfs_dentry));
         printf("directory logic: copied entry into dataBlockIdx=%d dentryIdx=%d\n", dataBlockIdx, dentryIdx);
 
         // edit parentInode
         parentInodePtr->nlinks++;
-        parentInodePtr->size += sizeof(struct wfs_dentry);
+        parentInodePtr->size += sizeof(struct hfs_dentry);
     }
 
     printf("Returning from mkdir\n");
     return SUCCESS;
 }
 
-static int wfs_unlink(const char *path) {
-    printf("Entering wfs_unlink: path = %s\n", path);
+static int hfs_unlink(const char *path) {
+    printf("Entering hfs_unlink: path = %s\n", path);
     char parentPath[MAX_PATH_NAME];
     char origPath[MAX_PATH_NAME];
     char fileName[MAX_PATH_NAME];
@@ -451,27 +451,27 @@ static int wfs_unlink(const char *path) {
 
     int parentInodeIdx = find_inode(parentPath);
     if (parentInodeIdx < 0) {
-        fprintf(stderr, "wfs_unlink: Parent directory not found\n");
+        fprintf(stderr, "hfs_unlink: Parent directory not found\n");
         return parentInodeIdx;
     }
-    struct wfs_inode *parentInode = get_inode(parentInodeIdx);
+    struct hfs_inode *parentInode = get_inode(parentInodeIdx);
     if (!parentInode) {
-        fprintf(stderr, "wfs_unlink: Invalid parent inode\n");
+        fprintf(stderr, "hfs_unlink: Invalid parent inode\n");
         return -ENOENT;
     }
     int inode_idx = find_inode(path);
     if (inode_idx < 0) {
-        fprintf(stderr, "wfs_unlink: File not found\n");
+        fprintf(stderr, "hfs_unlink: File not found\n");
         return inode_idx;
     }
-    struct wfs_inode *inode = get_inode(inode_idx);
+    struct hfs_inode *inode = get_inode(inode_idx);
     if (!inode) {
-        fprintf(stderr, "wfs_unlink: Invalid inode index\n");
+        fprintf(stderr, "hfs_unlink: Invalid inode index\n");
         return -ENOENT;
     }
 
     if (S_ISDIR(inode->mode)) {
-        fprintf(stderr, "wfs_unlink: Cannot unlink a directory\n");
+        fprintf(stderr, "hfs_unlink: Cannot unlink a directory\n");
         return -EISDIR;
     }
 
@@ -481,13 +481,13 @@ static int wfs_unlink(const char *path) {
             if (parentInode->blocks[block_index] == -1) {
                 continue;
             }
-            struct wfs_dentry *entries = (struct wfs_dentry*)(disks[disk] + superblock->d_blocks_ptr + parentInode->blocks[block_index] * BLOCK_SIZE);
+            struct hfs_dentry *entries = (struct hfs_dentry*)(disks[disk] + superblock->d_blocks_ptr + parentInode->blocks[block_index] * BLOCK_SIZE);
             
-            for (int entry_idx = 0; entry_idx * sizeof(struct wfs_dentry) < BLOCK_SIZE; entry_idx++) {
+            for (int entry_idx = 0; entry_idx * sizeof(struct hfs_dentry) < BLOCK_SIZE; entry_idx++) {
                 if (entries[entry_idx].num == inode_idx) {
-                    memset(&entries[entry_idx], 0, sizeof(struct wfs_dentry));
-                    struct wfs_inode *parentInodePtr = (struct wfs_inode*)(disks[disk] + superblock->i_blocks_ptr + parentInodeIdx * BLOCK_SIZE);
-                    parentInodePtr->size -= sizeof(struct wfs_dentry);
+                    memset(&entries[entry_idx], 0, sizeof(struct hfs_dentry));
+                    struct hfs_inode *parentInodePtr = (struct hfs_inode*)(disks[disk] + superblock->i_blocks_ptr + parentInodeIdx * BLOCK_SIZE);
+                    parentInodePtr->size -= sizeof(struct hfs_dentry);
                     parentInodePtr->nlinks--;
                     entry_removed = 1;
                     break;
@@ -519,25 +519,25 @@ static int wfs_unlink(const char *path) {
         }
     }
 
-    printf("Exiting wfs_unlink successfully\n");
+    printf("Exiting hfs_unlink successfully\n");
     return SUCCESS;
 }
 
-static int wfs_rmdir(const char *path) {
-    printf("Entering wfs_rmdir: path = %s\n", path);
+static int hfs_rmdir(const char *path) {
+    printf("Entering hfs_rmdir: path = %s\n", path);
     int inode_idx = find_inode(path);
     if (inode_idx < 0) {
-        fprintf(stderr, "wfs_rmdir: Directory not found\n");
+        fprintf(stderr, "hfs_rmdir: Directory not found\n");
         return inode_idx;
     }
-    struct wfs_inode *inode = get_inode(inode_idx);
+    struct hfs_inode *inode = get_inode(inode_idx);
     if (!inode) {
-        fprintf(stderr, "wfs_rmdir: Invalid inode index\n");
+        fprintf(stderr, "hfs_rmdir: Invalid inode index\n");
         return -ENOENT;
     }
 
     if (!S_ISDIR(inode->mode)) {
-        fprintf(stderr, "wfs_rmdir: Not a directory\n");
+        fprintf(stderr, "hfs_rmdir: Not a directory\n");
         return -ENOTDIR;
     }
 
@@ -545,9 +545,9 @@ static int wfs_rmdir(const char *path) {
     for (int block_index = 0; block_index < N_BLOCKS; block_index++) {
         if (inode->blocks[block_index] == -1) continue;
 
-        struct wfs_dentry *entries = (struct wfs_dentry*)(disks[0] + superblock->d_blocks_ptr + inode->blocks[block_index] * BLOCK_SIZE);
+        struct hfs_dentry *entries = (struct hfs_dentry*)(disks[0] + superblock->d_blocks_ptr + inode->blocks[block_index] * BLOCK_SIZE);
         
-        for (int entry_idx = 0; entry_idx * sizeof(struct wfs_dentry) < BLOCK_SIZE; entry_idx++) {
+        for (int entry_idx = 0; entry_idx * sizeof(struct hfs_dentry) < BLOCK_SIZE; entry_idx++) {
             if (entries[entry_idx].num > 0 && 
                 strcmp(entries[entry_idx].name, ".") != 0 && 
                 strcmp(entries[entry_idx].name, "..") != 0) {
@@ -560,7 +560,7 @@ static int wfs_rmdir(const char *path) {
     }
 
     if (!is_empty) {
-        fprintf(stderr, "wfs_rmdir: Directory is not empty\n");
+        fprintf(stderr, "hfs_rmdir: Directory is not empty\n");
         return -ENOTEMPTY;
     }
 
@@ -572,12 +572,12 @@ static int wfs_rmdir(const char *path) {
 
     int parentInodeIdx = find_inode(parentPath);
     if (parentInodeIdx < 0) {
-        fprintf(stderr, "wfs_rmdir: Parent directory not found\n");
+        fprintf(stderr, "hfs_rmdir: Parent directory not found\n");
         return parentInodeIdx;
     }
-    struct wfs_inode *parentInode = get_inode(parentInodeIdx);
+    struct hfs_inode *parentInode = get_inode(parentInodeIdx);
     if (!parentInode) {
-        fprintf(stderr, "wfs_rmdir: Invalid parent inode\n");
+        fprintf(stderr, "hfs_rmdir: Invalid parent inode\n");
         return -ENOENT;
     }
 
@@ -586,13 +586,13 @@ static int wfs_rmdir(const char *path) {
         for (int block_index = 0; block_index < N_BLOCKS; block_index++) {
             if (parentInode->blocks[block_index] == -1) continue;
 
-            struct wfs_dentry *entries = (struct wfs_dentry*)(disks[disk] + superblock->d_blocks_ptr + parentInode->blocks[block_index] * BLOCK_SIZE);
+            struct hfs_dentry *entries = (struct hfs_dentry*)(disks[disk] + superblock->d_blocks_ptr + parentInode->blocks[block_index] * BLOCK_SIZE);
             
-            for (int entry_idx = 0; entry_idx * sizeof(struct wfs_dentry) < BLOCK_SIZE; entry_idx++) {
+            for (int entry_idx = 0; entry_idx * sizeof(struct hfs_dentry) < BLOCK_SIZE; entry_idx++) {
                 if (entries[entry_idx].num == inode_idx) {
-                    memset(&entries[entry_idx], 0, sizeof(struct wfs_dentry));
-                    struct wfs_inode *parentInodePtr = (struct wfs_inode*)(disks[disk] + superblock->i_blocks_ptr + parentInodeIdx * BLOCK_SIZE);
-                    parentInodePtr->size -= sizeof(struct wfs_dentry);
+                    memset(&entries[entry_idx], 0, sizeof(struct hfs_dentry));
+                    struct hfs_inode *parentInodePtr = (struct hfs_inode*)(disks[disk] + superblock->i_blocks_ptr + parentInodeIdx * BLOCK_SIZE);
+                    parentInodePtr->size -= sizeof(struct hfs_dentry);
                     parentInodePtr->nlinks--;
                     break;
                 }
@@ -613,16 +613,16 @@ static int wfs_rmdir(const char *path) {
         memset(disks[disk] + superblock->i_blocks_ptr + inode_idx * BLOCK_SIZE, 0, BLOCK_SIZE);
     }
 
-    printf("Exiting wfs_rmdir successfully\n");
+    printf("Exiting hfs_rmdir successfully\n");
     return SUCCESS;
 }
 
-static int wfs_read(const char *path, char *buf, size_t size, off_t offset, struct fuse_file_info *fi) {
-    printf("Entering wfs_read: path=%s, size=%zu, offset=%ld\n", path, size, offset);
+static int hfs_read(const char *path, char *buf, size_t size, off_t offset, struct fuse_file_info *fi) {
+    printf("Entering hfs_read: path=%s, size=%zu, offset=%ld\n", path, size, offset);
     int inode_idx = find_inode(path);
     if (inode_idx < 0) return -ENOENT;
     
-    struct wfs_inode *inode = get_inode(inode_idx);
+    struct hfs_inode *inode = get_inode(inode_idx);
     if (!inode) return -ENOENT;
 
     if (offset >= inode->size) return 0;
@@ -645,7 +645,7 @@ static int wfs_read(const char *path, char *buf, size_t size, off_t offset, stru
             if (inode->blocks[IND_BLOCK] == -1) {
                 return bytes_read;
             }
-            struct wfs_ind_block *ind_block = (struct wfs_ind_block *)(disks[0] + 
+            struct hfs_ind_block *ind_block = (struct hfs_ind_block *)(disks[0] + 
                 superblock->d_blocks_ptr + inode->blocks[IND_BLOCK] * BLOCK_SIZE);
             block_num = ind_block->blocks[block_index - D_BLOCK];
         } else {
@@ -679,12 +679,12 @@ static int wfs_read(const char *path, char *buf, size_t size, off_t offset, stru
     return bytes_read;  
 }
 
-static int wfs_write(const char *path, const char *buf, size_t size, off_t offset, struct fuse_file_info *fi) {
-    printf("Entering wfs_write\n");
+static int hfs_write(const char *path, const char *buf, size_t size, off_t offset, struct fuse_file_info *fi) {
+    printf("Entering hfs_write\n");
     int inode_idx = find_inode(path);
     if (inode_idx < 0) return -ENOENT;
     
-    struct wfs_inode *inode = get_inode(inode_idx);
+    struct hfs_inode *inode = get_inode(inode_idx);
     if (!inode) return -ENOENT;
 
     size_t bytes_written = 0;
@@ -694,7 +694,7 @@ static int wfs_write(const char *path, const char *buf, size_t size, off_t offse
         int block_offset = current_offset % BLOCK_SIZE;
         
         off_t *block_num_ptr = NULL;
-        struct wfs_ind_block *ind_block = NULL;
+        struct hfs_ind_block *ind_block = NULL;
         // direct or indirect
         if (block_index < D_BLOCK) {
             block_num_ptr = &inode->blocks[block_index];
@@ -707,11 +707,11 @@ static int wfs_write(const char *path, const char *buf, size_t size, off_t offse
                 if (superblock->mode == 0) {
                     int disk_index = new_block % superblock->num_disks;
                     off_t local_block_num = new_block / superblock->num_disks;
-                    ind_block = (struct wfs_ind_block *)(disks[disk_index] + superblock->d_blocks_ptr + local_block_num * BLOCK_SIZE);
+                    ind_block = (struct hfs_ind_block *)(disks[disk_index] + superblock->d_blocks_ptr + local_block_num * BLOCK_SIZE);
                     memset(ind_block, -1, BLOCK_SIZE);
                 } else {  
                     for (int i = 0; i < superblock->num_disks; i++) {
-                        ind_block = (struct wfs_ind_block *)(disks[i] + superblock->d_blocks_ptr + new_block * BLOCK_SIZE);
+                        ind_block = (struct hfs_ind_block *)(disks[i] + superblock->d_blocks_ptr + new_block * BLOCK_SIZE);
                         memset(ind_block, -1, BLOCK_SIZE);
                     }
                 }
@@ -721,9 +721,9 @@ static int wfs_write(const char *path, const char *buf, size_t size, off_t offse
             if (superblock->mode == 0) {
                 int disk_index = inode->blocks[IND_BLOCK] % superblock->num_disks;
                 off_t local_block_num = inode->blocks[IND_BLOCK] / superblock->num_disks;
-                ind_block = (struct wfs_ind_block *)(disks[disk_index] + superblock->d_blocks_ptr + local_block_num * BLOCK_SIZE);
+                ind_block = (struct hfs_ind_block *)(disks[disk_index] + superblock->d_blocks_ptr + local_block_num * BLOCK_SIZE);
             } else {
-                ind_block = (struct wfs_ind_block *)(disks[0] + superblock->d_blocks_ptr + inode->blocks[IND_BLOCK] * BLOCK_SIZE);
+                ind_block = (struct hfs_ind_block *)(disks[0] + superblock->d_blocks_ptr + inode->blocks[IND_BLOCK] * BLOCK_SIZE);
             }
             block_num_ptr = &ind_block->blocks[block_index - D_BLOCK];
         } else {
@@ -772,7 +772,7 @@ static int wfs_write(const char *path, const char *buf, size_t size, off_t offse
                 memcpy(block_addr + block_offset, buf + bytes_written, block_bytes);
                 
                 if (ind_block && i > 0) {
-                    ind_block = (struct wfs_ind_block *)(disks[i] + superblock->d_blocks_ptr + inode->blocks[IND_BLOCK] * BLOCK_SIZE);
+                    ind_block = (struct hfs_ind_block *)(disks[i] + superblock->d_blocks_ptr + inode->blocks[IND_BLOCK] * BLOCK_SIZE);
                     ind_block->blocks[block_index - D_BLOCK] = *block_num_ptr;
                 }
             }
@@ -788,16 +788,16 @@ static int wfs_write(const char *path, const char *buf, size_t size, off_t offse
     inode->mtim = time(NULL);
 
     for (int i = 0; i < superblock->num_disks; i++) {
-        struct wfs_inode *mirror_inode = (struct wfs_inode *)(disks[i] + superblock->i_blocks_ptr + inode_idx * BLOCK_SIZE);
-        memcpy(mirror_inode, inode, sizeof(struct wfs_inode));
+        struct hfs_inode *mirror_inode = (struct hfs_inode *)(disks[i] + superblock->i_blocks_ptr + inode_idx * BLOCK_SIZE);
+        memcpy(mirror_inode, inode, sizeof(struct hfs_inode));
     }
 
     return bytes_written;
 }
 
 
-static int wfs_readdir(const char* path, void* buf, fuse_fill_dir_t filler, off_t offset, struct fuse_file_info* fi) {
-    printf("Entering wfs_readdir, path is: %s\n", path); 
+static int hfs_readdir(const char* path, void* buf, fuse_fill_dir_t filler, off_t offset, struct fuse_file_info* fi) {
+    printf("Entering hfs_readdir, path is: %s\n", path); 
     filler(buf, ".", NULL, 0);
     filler(buf, "..", NULL, 0);
 
@@ -806,7 +806,7 @@ static int wfs_readdir(const char* path, void* buf, fuse_fill_dir_t filler, off_
         fprintf(stderr, "Found invalid inode index\n");
         return -ENOENT;
     }
-    struct wfs_inode *inode = get_inode(inode_idx);
+    struct hfs_inode *inode = get_inode(inode_idx);
     if (!inode) {
         fprintf(stderr, "Invalid inode index, cannot find inode\n");
         return -ENOENT;
@@ -814,18 +814,18 @@ static int wfs_readdir(const char* path, void* buf, fuse_fill_dir_t filler, off_
 
     if (!(inode->mode & S_IFDIR)) return -ENOTDIR;
 
-    for (int offset = 0; offset < inode->size; offset += sizeof(struct wfs_dentry)) {
-        struct wfs_dentry *entry = NULL;
+    for (int offset = 0; offset < inode->size; offset += sizeof(struct hfs_dentry)) {
+        struct hfs_dentry *entry = NULL;
 
         switch(superblock->mode) {
             case 0: {
                 int disk_index = (inode->blocks[0] * BLOCK_SIZE + offset) % superblock->num_disks;
-                entry = (struct wfs_dentry *)(disks[disk_index] + superblock->d_blocks_ptr + inode->blocks[0] * BLOCK_SIZE + offset);
+                entry = (struct hfs_dentry *)(disks[disk_index] + superblock->d_blocks_ptr + inode->blocks[0] * BLOCK_SIZE + offset);
                 break;
             }
             case 1:
             case 2: {
-                entry = (struct wfs_dentry *)(disks[0] + superblock->d_blocks_ptr + inode->blocks[0] * BLOCK_SIZE + offset);
+                entry = (struct hfs_dentry *)(disks[0] + superblock->d_blocks_ptr + inode->blocks[0] * BLOCK_SIZE + offset);
                 break;
             }
             default:
@@ -842,14 +842,14 @@ static int wfs_readdir(const char* path, void* buf, fuse_fill_dir_t filler, off_
 }
 
 static struct fuse_operations ops = {
-    .getattr = wfs_getattr,
-    .mknod   = wfs_mknod,
-    .mkdir   = wfs_mkdir,
-    .unlink  = wfs_unlink,
-    .rmdir   = wfs_rmdir,
-    .read    = wfs_read,
-    .write   = wfs_write,
-    .readdir = wfs_readdir,
+    .getattr = hfs_getattr,
+    .mknod   = hfs_mknod,
+    .mkdir   = hfs_mkdir,
+    .unlink  = hfs_unlink,
+    .rmdir   = hfs_rmdir,
+    .read    = hfs_read,
+    .write   = hfs_write,
+    .readdir = hfs_readdir,
 };
 
 int main(int argc, char *argv[]) {
@@ -897,7 +897,7 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    superblock = (struct wfs_sb *)disks[0];
+    superblock = (struct hfs_sb *)disks[0];
 
     if (superblock == NULL) {
         fprintf(stderr, "Failed to access superblock\n");

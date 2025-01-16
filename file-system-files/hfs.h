@@ -24,7 +24,7 @@ i_bitmap_ptr        i_blocks_ptr
 */
 
 // Superblock
-struct wfs_sb {
+struct hfs_sb {
     size_t num_inodes;
     size_t num_data_blocks;
     off_t i_bitmap_ptr;
@@ -38,7 +38,7 @@ struct wfs_sb {
 };
 
 // Inode
-struct wfs_inode {
+struct hfs_inode {
     int     num;      /* Inode number */
     mode_t  mode;     /* File type and mode */
     uid_t   uid;      /* User ID of owner */
@@ -54,11 +54,11 @@ struct wfs_inode {
 };
 
 // Directory entry
-struct wfs_dentry {
+struct hfs_dentry {
     char name[MAX_NAME];
     int num;
 };
 
-struct wfs_ind_block {
+struct hfs_ind_block {
     off_t blocks[BLOCK_SIZE / sizeof(off_t)];
 };
