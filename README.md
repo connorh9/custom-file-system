@@ -24,8 +24,8 @@ After running mkfs, you can then run hfs like so:
 The options are intended for FUSE, this code assumes -s will be passed every time to disable multi-threading. -f can be passed to run the file system in the foreground, doing this would require you to open a second terminal to use the system.
 
 ## Supported features
-Create empty files/directories
-Read/Write files up to max size of indirect block
-Read directory
-Remove an entry
-Get stats of a file/folder
+Create empty files/directories  
+Read/Write files up to max size of indirect block  
+Read directory  
+Remove an entry  
+Get stats of a file/folder  
